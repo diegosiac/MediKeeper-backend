@@ -10,11 +10,14 @@ import (
 )
 
 func main() {
-	db.DBConnection()
+	database := db.DBConnection()
+
+	authHandler := auth.NewHandler(database)
 
 	r := mux.NewRouter()
-	r.HandleFunc("/login", auth.LoginHandler).Methods("POST")
-	r.HandleFunc("/register", auth.RegisterHandler).Methods("POST")
+	apiRouter := r.PathPrefix("/api").Subrouter()
+
+	authHandler.RegisterRoutes(apiRouter)
 
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
