@@ -2,56 +2,64 @@ package auth
 
 import (
 	"e-commerce-back/internal/models"
-	"e-commerce-back/pkg/db"
-	"encoding/json"
-	"fmt"
-	"net/http"
+	"errors"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
-func RegisterHandler(w http.ResponseWriter, r *http.Request) {
-	var user models.User
+type Service struct {
+	db *gorm.DB
+}
 
-	fmt.Println("RegisterHandler")
+func NewService(db *gorm.DB) *Service {
+	return &Service{db: db}
+}
 
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
+func (s *Service) CreateUser(user models.User) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return err
 	}
 
 	user.Password = string(hashedPassword)
-	if err := db.DB.Create(&user).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
+	return s.db.Create(&user).Error
 }
 
-func LoginHandler(w http.ResponseWriter, r *http.Request) {
-	var user models.User
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
+func (s *Service) IsValidUser(user models.User) (string, error) {
 	var storedUser models.User
-	if err := db.DB.Where("email = ?", user.Email).First(&storedUser).Error; err != nil {
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
-		return
+
+	if err := s.db.Where("username = ?", user.Username).First(&storedUser).Error; err != nil {
+		return "", errors.New("invalid username or password a")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password)); err != nil {
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
-		return
+		return "", errors.New("invalid username or password")
 	}
 
-	w.WriteHeader(http.StatusOK)
+	token, err := generateJWT(storedUser)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
+
+func generateJWT(user models.User) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":       user.ID,
+		"username": user.Username,
+		"email":    user.Email,
+		"exp":      time.Now().Add(time.Hour * 72).Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte("secret"))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
